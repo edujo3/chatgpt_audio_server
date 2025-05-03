@@ -2,3 +2,5 @@ Flask
 openai
 gtts
 python-dotenv
+fastapi
+uvicorn[standard]
