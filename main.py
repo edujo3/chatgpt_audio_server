@@ -1,34 +1,56 @@
-from fastapi import FastAPI, File, UploadFile
+from flask import Flask, request, jsonify, send_file
 import openai
+import tempfile
+from gtts import gTTS
 import os
 
-app = FastAPI()
+app = Flask(__name__)
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Usa tus variables de entorno
 
-@app.post("/voice")
-async def receive_audio(file: UploadFile = File(...)):
-    # Guardar el archivo recibido
-    file_location = f"temp_audio/{file.filename}"
-    with open(file_location, "wb") as f:
-        f.write(await file.read())
+@app.route("/")
+def index():
+    return "Servidor ChatGPT por Voz está activo ✅"
 
-    # Enviar a OpenAI Whisper para transcripción (usa el modelo whisper-1)
-    audio_file = open(file_location, "rb")
-    transcript = openai.Audio.transcribe("whisper-1", audio_file)
+@app.route("/audio", methods=["POST"])
+def audio_to_chat():
+    if "audio" not in request.files:
+        return jsonify({"error": "No se recibió archivo de audio"}), 400
 
-    print("Usuario dijo:", transcript['text'])
+    audio_file = request.files["audio"]
+    
+    # Guarda archivo temporal
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+        audio_file.save(temp_audio.name)
+        temp_audio_path = temp_audio.name
 
-    # Enviar la transcripción a ChatGPT
-    completion = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{
-            "role": "user",
-            "content": transcript['text']
-        }]
-    )
+    try:
+        # Transcripción con Whisper
+        transcript = openai.Audio.transcribe("whisper-1", open(temp_audio_path, "rb"))
+        texto_usuario = transcript["text"]
 
-    response_text = completion.choices[0].message.content
-    print("Respuesta GPT:", response_text)
+        # Consulta a ChatGPT
+        respuesta = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres un asistente emocional que escucha al usuario y le responde con empatía, lo orientaen el tema psicológico y emocional. No abordas otros temas diferentes."},
+                {"role": "user", "content": texto_usuario}
+            ]
+        )
+        texto_respuesta = respuesta.choices[0].message["content"]
 
-    return {"response": response_text}
+        # Convierte texto en audio
+        tts = gTTS(text=texto_respuesta, lang="es")
+        respuesta_audio_path = "respuesta.mp3"
+        tts.save(respuesta_audio_path)
+
+        return send_file(respuesta_audio_path, mimetype="audio/mpeg")
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        os.remove(temp_audio_path)
+
+if __name__ == "__main__":
+    app.run(debug=True)
