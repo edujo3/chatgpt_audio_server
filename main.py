@@ -33,7 +33,7 @@ def audio_to_chat():
         respuesta = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Eres un asistente emocional que escucha al usuario y le responde con empatía, lo orientaen el tema psicológico y emocional. No abordas otros temas diferentes."},
+                {"role": "system", "content": "Eres un asistente emocional que escucha al usuario y le responde con empatía, lo orienta en el tema psicológico y emocional. No abordas otros temas diferentes."},
                 {"role": "user", "content": texto_usuario}
             ]
         )
