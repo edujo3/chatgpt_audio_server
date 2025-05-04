@@ -5,7 +5,7 @@ import tempfile
 import os
 
 app = Flask(__name__)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Usa la variable de entorno
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @app.route("/")
 def index():
@@ -18,20 +18,17 @@ def audio_to_chat():
 
     audio_file = request.files["audio"]
 
-    # Guardar archivo temporal
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
         audio_file.save(temp_audio.name)
         temp_audio_path = temp_audio.name
 
     try:
-        # Transcripción con Whisper
         transcript = client.audio.transcriptions.create(
             model="whisper-1",
             file=open(temp_audio_path, "rb")
         )
         texto_usuario = transcript.text
 
-        # ChatGPT
         respuesta = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -41,7 +38,6 @@ def audio_to_chat():
         )
         texto_respuesta = respuesta.choices[0].message.content
 
-        # Convertir texto a audio
         tts = gTTS(text=texto_respuesta, lang="es")
         respuesta_audio_path = "respuesta.mp3"
         tts.save(respuesta_audio_path)
@@ -53,8 +49,3 @@ def audio_to_chat():
 
     finally:
         os.remove(temp_audio_path)
-
-if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port)
