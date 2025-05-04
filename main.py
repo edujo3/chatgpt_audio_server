@@ -1,11 +1,11 @@
 from flask import Flask, request, jsonify, send_file
 from openai import OpenAI
-import tempfile
 from gtts import gTTS
+import tempfile
 import os
 
 app = Flask(__name__)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Usa la variable de entorno
 
 @app.route("/")
 def index():
@@ -18,26 +18,30 @@ def audio_to_chat():
 
     audio_file = request.files["audio"]
 
+    # Guardar archivo temporal
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
         audio_file.save(temp_audio.name)
         temp_audio_path = temp_audio.name
 
     try:
+        # Transcripción con Whisper
         transcript = client.audio.transcriptions.create(
             model="whisper-1",
             file=open(temp_audio_path, "rb")
         )
         texto_usuario = transcript.text
 
+        # ChatGPT
         respuesta = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Eres un asistente emocional que escucha al usuario y le responde con empatía, lo orienta en el tema psicológico y emocional. No abordas otros temas."},
+                {"role": "system", "content": "Eres un asistente emocional que escucha al usuario y le responde con empatía."},
                 {"role": "user", "content": texto_usuario}
             ]
         )
         texto_respuesta = respuesta.choices[0].message.content
 
+        # Convertir texto a audio
         tts = gTTS(text=texto_respuesta, lang="es")
         respuesta_audio_path = "respuesta.mp3"
         tts.save(respuesta_audio_path)
