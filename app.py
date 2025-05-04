@@ -6,7 +6,7 @@ import uuid
 
 app = Flask(__name__)
 
-# Clave de OpenAI desde variable de entorno
+# Obtener la API Key desde las variables de entorno (Railway)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route("/")
@@ -19,38 +19,45 @@ def procesar_audio():
         return "❌ Archivo 'audio' no encontrado", 400
 
     audio_file = request.files['audio']
-    
-    # Guardar temporalmente el audio
-    audio_filename = f"/tmp/{uuid.uuid4()}.wav"
-    audio_file.save(audio_filename)
+    audio_file.seek(0)  # Asegura que el puntero esté al inicio del archivo
 
-    # 🧠 Aquí deberías hacer el reconocimiento de voz (STT)
-    # Esta parte está simulada por ahora
-    texto_simulado = "Hola, ¿cómo estás?"
-
-    # Enviar texto a ChatGPT
     try:
-        respuesta = openai.ChatCompletion.create(
+        # 🎙️ Transcripción con Whisper
+        whisper_response = openai.Audio.transcribe(
+            model="whisper-1",
+            file=audio_file,
+            language="es"
+        )
+        texto_transcrito = whisper_response["text"]
+        print(f"📝 Texto transcrito: {texto_transcrito}")
+    except Exception as e:
+        return f"❌ Error al transcribir con Whisper: {str(e)}", 500
+
+    try:
+        # 💬 Envío del texto a ChatGPT
+        chat_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "Eres un asistente emocional que responde de forma empática."},
-                {"role": "user", "content": texto_simulado}
+                {"role": "user", "content": texto_transcrito}
             ]
         )
-        respuesta_texto = respuesta.choices[0].message.content.strip()
+        respuesta_texto = chat_response.choices[0].message.content.strip()
+        print(f"🤖 Respuesta de ChatGPT: {respuesta_texto}")
     except Exception as e:
-        return f"❌ Error en ChatGPT: {str(e)}", 500
+        return f"❌ Error al generar respuesta de ChatGPT: {str(e)}", 500
 
-    # Convertir respuesta a audio con gTTS
     try:
+        # 🔊 Conversión a audio (respuesta.mp3)
         tts = gTTS(respuesta_texto, lang="es")
         respuesta_path = "/tmp/respuesta.mp3"
         tts.save(respuesta_path)
     except Exception as e:
-        return f"❌ Error al generar audio: {str(e)}", 500
+        return f"❌ Error al generar el audio con gTTS: {str(e)}", 500
 
+    # 📤 Enviar archivo MP3 al ESP32
     return send_file(respuesta_path, mimetype="audio/mpeg")
 
-# Para correr en local o debug
+# Modo local o debug
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
