@@ -1,5 +1,4 @@
-fastapi
-uvicorn[standard]
+Flask==2.3.3
+gTTS==2.3.2
 openai>=1.0.0
-gtts
-python-multipart
+python-dotenv==1.0.1
