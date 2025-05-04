@@ -1,13 +1,27 @@
-.env
+# Carpeta de archivos temporales (audio, cachés, etc.)
+/tmp/
+respuesta.mp3
+
+# Python bytecode
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Entornos virtuales
 env/
 venv/
-*.wav
-*.mp3
-*.ogg
+.venv/
+
+# Archivos temporales del sistema y editores
+*.log
+*.tmp
+*.bak
+*.swp
 .DS_Store
 .idea/
 .vscode/
+
+# Variables de entorno locales
+.env
+secrets.env
