@@ -34,7 +34,10 @@ def procesar_audio():
 
     # Convertir a audio
     tts = gTTS(respuesta_texto, lang='es')
+    
     respuesta_path = "/tmp/respuesta.mp3"
     tts.save(respuesta_path)
 
     return send_file(respuesta_path, mimetype="audio/mpeg")
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
