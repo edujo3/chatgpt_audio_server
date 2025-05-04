@@ -1,62 +1,52 @@
-from flask import Flask, request, jsonify, send_file
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import FileResponse
 from openai import OpenAI
 from gtts import gTTS
 import tempfile
 import os
 
-app = Flask(__name__)
+client = OpenAI()  # Usará la variable de entorno OPENAI_API_KEY
 
-# ✅ Inicializa el cliente con la API key desde las variables de entorno
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+app = FastAPI()
 
-@app.route("/")
+@app.get("/")
 def index():
-    return "Servidor ChatGPT por Voz está activo ✅"
+    return {"status": "Servidor ChatGPT por voz activo ✅"}
 
-@app.route("/audio", methods=["POST"])
-def audio_to_chat():
-    if "audio" not in request.files:
-        return jsonify({"error": "No se recibió archivo de audio"}), 400
-
-    audio_file = request.files["audio"]
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-        audio_file.save(temp_audio.name)
-        temp_audio_path = temp_audio.name
-
+@app.post("/audio")
+async def audio_to_chat(audio: UploadFile = File(...)):
     try:
-        # Transcripción con Whisper
-        with open(temp_audio_path, "rb") as f:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=f,
-                response_format="text"
-            )
+        # Guardar archivo temporal
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+            temp_audio.write(await audio.read())
+            temp_audio_path = temp_audio.name
 
-        texto_usuario = transcript.strip()
+        # Transcribir
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=open(temp_audio_path, "rb")
+        )
+        texto_usuario = transcript.text
 
         # Consulta a ChatGPT
-        response = client.chat.completions.create(
+        respuesta = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Eres un asistente emocional que escucha al usuario y le responde con empatía, lo orienta en el tema psicológico y emocional. No abordas otros temas diferentes."},
+                {"role": "system", "content": "Eres un asistente emocional que responde con empatía."},
                 {"role": "user", "content": texto_usuario}
             ]
         )
-        texto_respuesta = response.choices[0].message.content
+        texto_respuesta = respuesta.choices[0].message.content
 
-        # Convierte texto en audio
-        tts = gTTS(text=texto_respuesta, lang="es")
+        # Generar respuesta en audio
         respuesta_audio_path = "respuesta.mp3"
+        tts = gTTS(text=texto_respuesta, lang="es")
         tts.save(respuesta_audio_path)
 
-        return send_file(respuesta_audio_path, mimetype="audio/mpeg")
+        return FileResponse(respuesta_audio_path, media_type="audio/mpeg")
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+        return {"error": str(e)}
     finally:
-        os.remove(temp_audio_path)
-
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8000)
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
