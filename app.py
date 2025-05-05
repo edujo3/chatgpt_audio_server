@@ -7,7 +7,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# Reemplaza con tu clave real de OpenAI
+# Configuración de OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route("/")
@@ -19,57 +19,89 @@ def procesar_audio():
     if not request.data:
         return "❌ No se recibió audio", 400
 
-    # Guarda el audio recibido en un archivo temporal .wav
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
-        temp_wav.write(request.data)
-        temp_wav_path = temp_wav.name
+    # Validación tamaño mínimo del audio
+    if len(request.data) < 10240:
+        return "❌ Audio demasiado corto", 400
 
     try:
-        # Transcripción con Whisper
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
+            temp_wav.write(request.data)
+            temp_wav.flush()
+            temp_wav_path = temp_wav.name
+        
+        if os.path.getsize(temp_wav_path) < 10240:
+            raise ValueError("Archivo WAV demasiado pequeño")
+
+        # Transcripción
         with open(temp_wav_path, "rb") as f:
-            transcription = openai.Audio.transcribe(
-                model="whisper-1",
-                file=f,
-                language="es"
-            )
-        texto = transcription["text"]
-        print("📝 Texto transcrito:", texto)
+            transcription = openai.Audio.transcribe("whisper-1", f, language="es")
+        texto = transcription["text"].strip()
+        
+        if not texto or len(texto) < 3:
+            raise ValueError("Transcripción vacía o muy corta")
 
-        # Respuesta generada por ChatGPT
+        # Generar respuesta emocional
         respuesta = generar_respuesta_chatgpt(texto)
-        print("💬 Respuesta:", respuesta)
+        if not respuesta or len(respuesta) < 5:
+            raise ValueError("Respuesta de ChatGPT inválida")
 
-        # Generar nombre de archivo con timestamp
+        # Generar MP3
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"respuesta_{timestamp}.mp3"
         output_path = os.path.join(tempfile.gettempdir(), filename)
-
-        # Texto a voz con gTTS
-        tts = gTTS(text=respuesta, lang='es')
+        
+        tts = gTTS(text=respuesta, lang='es', slow=False)
         tts.save(output_path)
+        
+        if os.path.getsize(output_path) < 10240:
+            raise ValueError("Archivo MP3 demasiado pequeño")
 
-        # Devuelve el archivo MP3 generado con nombre consistente
-        return send_file(
+        response = send_file(
             output_path,
             mimetype="audio/mpeg",
             as_attachment=True,
             download_name=filename
         )
+        return response
 
     except Exception as e:
-        print("❌ Error:", str(e))
+        app.logger.error(f"Error: {str(e)}")
         return f"❌ Error: {str(e)}", 500
     finally:
-        os.remove(temp_wav_path)
-        if 'output_path' in locals() and os.path.exists(output_path):
-            os.remove(output_path)
+        for path in [temp_wav_path, output_path]:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except:
+                    pass
 
 def generar_respuesta_chatgpt(texto_usuario):
+    sistema_prompt = """
+    Eres un asistente emocional llamado Comet. Tu misión es proporcionar apoyo emocional mediante:
+    1. Validación emocional: "Entiendo que esto debe ser difícil para ti..."
+    2. Escucha activa: "¿Quieres contarme más sobre cómo te hace sentir esto?"
+    3. Normalización: "Es humano sentirse así en estas situaciones..."
+    4. Empatía cognitiva: "Por lo que me dices, parece que te sientes..."
+    5. Apoyo incondicional: "Estoy aquí para escucharte sin juzgarte..."
+
+    Directrices:
+    - Usa lenguaje cálido pero profesional
+    - Limita respuestas a 2-3 frases
+    - Adapta tu tono al estado emocional del usuario
+    - Evita dar consejos no solicitados
+    - Haz preguntas abiertas cuando sea apropiado
+    """
+    
     respuesta = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "Eres un asistente emocional amable y empático."},
+            {"role": "system", "content": sistema_prompt},
             {"role": "user", "content": texto_usuario}
-        ]
+        ],
+        temperature=0.7,
+        max_tokens=150
     )
-    return respuesta["choices"][0]["message"]["content"]
+    return respuesta["choices"][0]["message"]["content"].strip()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
