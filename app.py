@@ -7,8 +7,44 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# Configuración de OpenAI
+# Configuración
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB máximo
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# Prompt mejorado para asistente emocional
+SISTEMA_PROMPT = """
+Eres Comet, un asistente emocional AI con las siguientes características:
+
+1. **Empatía profunda**:
+   - "Entiendo lo difícil que debe ser esto para ti..."
+   - "Puedo ver que esto te afecta mucho..."
+
+2. **Validación emocional**:
+   - "Es completamente normal sentirse así en esta situación"
+   - "Tus sentimientos son válidos y comprensibles"
+
+3. **Escucha activa**:
+   - "¿Quieres contarme más sobre qué te hace sentir así?"
+   - "Parece que hay algo más detrás de esto, ¿me lo compartirías?"
+
+4. **Apoyo sin juicios**:
+   - "Estoy aquí para escucharte sin juzgarte"
+   - "Este es un espacio seguro para expresarte"
+
+5. **Lenguaje cálido**:
+   - Usa palabras como "cariño", "amigo" cuando sea apropiado
+   - Emoticons sutiles: "💙", "✨"
+
+6. **Técnicas terapéuticas**:
+   - Preguntas reflexivas: "¿Cómo te gustaría sentirte en lugar de esto?"
+   - Reframe positivo: "¿Qué has aprendido de esta situación?"
+
+Directrices técnicas:
+- Mantén respuestas entre 15-25 palabras
+- Usa oraciones cortas para mejor síntesis de voz
+- Evita jerga técnica
+- Adapta el tono al estado emocional del usuario
+"""
 
 @app.route("/")
 def index():
@@ -16,96 +52,79 @@ def index():
 
 @app.route("/procesar_audio", methods=["POST"])
 def procesar_audio():
-    if not request.data:
-        return "❌ No se recibió audio", 400
-
-    # Validación tamaño mínimo del audio
-    if len(request.data) < 10240:
-        return "❌ Audio demasiado corto", 400
-
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
-            temp_wav.write(request.data)
-            temp_wav.flush()
-            temp_wav_path = temp_wav.name
+        # Validación básica
+        if not request.data or len(request.data) < 10240:
+            return "❌ Audio inválido o demasiado corto", 400
+
+        # Procesamiento en etapas con manejo de errores
+        temp_wav_path, output_path = None, None
         
-        if os.path.getsize(temp_wav_path) < 10240:
-            raise ValueError("Archivo WAV demasiado pequeño")
+        try:
+            # 1. Guardar audio temporal
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
+                temp_wav.write(request.data)
+                temp_wav_path = temp_wav.name
 
-        # Transcripción
-        with open(temp_wav_path, "rb") as f:
-            transcription = openai.Audio.transcribe("whisper-1", f, language="es")
-        texto = transcription["text"].strip()
-        
-        if not texto or len(texto) < 3:
-            raise ValueError("Transcripción vacía o muy corta")
+            # 2. Transcribir con Whisper
+            with open(temp_wav_path, "rb") as f:
+                transcription = openai.Audio.transcribe("whisper-1", f, language="es")
+            texto = transcription["text"].strip()
+            
+            if not texto:
+                return "❌ No se pudo transcribir el audio", 400
 
-        # Generar respuesta emocional
-        respuesta = generar_respuesta_chatgpt(texto)
-        if not respuesta or len(respuesta) < 5:
-            raise ValueError("Respuesta de ChatGPT inválida")
+            # 3. Generar respuesta emocional
+            respuesta = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": SISTEMA_PROMPT},
+                    {"role": "user", "content": texto}
+                ],
+                temperature=0.8,
+                max_tokens=100,
+                request_timeout=20
+            ).choices[0].message.content
 
-        # Generar MP3
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"respuesta_{timestamp}.mp3"
-        output_path = os.path.join(tempfile.gettempdir(), filename)
-        
-        tts = gTTS(text=respuesta, lang='es', slow=False)
-        tts.save(output_path)
+            # 4. Convertir a voz
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"respuesta_{timestamp}.mp3"
+            output_path = os.path.join(tempfile.gettempdir(), filename)
+            
+            tts = gTTS(
+                text=respuesta,
+                lang='es',
+                slow=False,
+                lang_check=False  # Para evitar crashes con caracteres especiales
+            )
+            tts.save(output_path)
 
-app.logger.info(f"Tamaño WAV recibido: {len(request.data)} bytes")
-app.logger.info(f"Tamaño MP3 generado: {os.path.getsize(output_path)} bytes")
-app.logger.info(f"Duración estimada audio: {os.path.getsize(output_path)/3200:.2f} segundos")
+            # Logs para diagnóstico
+            app.logger.info(f"Procesado: {len(texto)} chars → {os.path.getsize(output_path)} bytes")
 
-        if os.path.getsize(output_path) < 10240:
-            raise ValueError("Archivo MP3 demasiado pequeño")
+            return send_file(
+                output_path,
+                mimetype="audio/mpeg",
+                as_attachment=True,
+                download_name=filename
+            )
 
-        response = send_file(
-            output_path,
-            mimetype="audio/mpeg",
-            as_attachment=True,
-            download_name=filename
-        )
-        return response
+        except Exception as e:
+            app.logger.error(f"Error en procesamiento: {str(e)}")
+            return f"❌ Error: {str(e)}", 500
+
+        finally:
+            # Limpieza garantizada
+            for path in [temp_wav_path, output_path]:
+                if path and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except:
+                        pass
 
     except Exception as e:
-        app.logger.error(f"Error: {str(e)}")
-        return f"❌ Error: {str(e)}", 500
-    finally:
-        for path in [temp_wav_path, output_path]:
-            if path and os.path.exists(path):
-                try:
-                    os.remove(path)
-                except:
-                    pass
-
-def generar_respuesta_chatgpt(texto_usuario):
-    sistema_prompt = """
-    Eres un asistente emocional llamado Comet. Tu misión es proporcionar apoyo emocional mediante:
-    1. Validación emocional: "Entiendo que esto debe ser difícil para ti..."
-    2. Escucha activa: "¿Quieres contarme más sobre cómo te hace sentir esto?"
-    3. Normalización: "Es humano sentirse así en estas situaciones..."
-    4. Empatía cognitiva: "Por lo que me dices, parece que te sientes..."
-    5. Apoyo incondicional: "Estoy aquí para escucharte sin juzgarte..."
-
-    Directrices:
-    - Usa lenguaje cálido pero profesional
-    - Limita respuestas a 2-3 frases
-    - Adapta tu tono al estado emocional del usuario
-    - Evita dar consejos no solicitados
-    - Haz preguntas abiertas cuando sea apropiado
-    """
-    
-    respuesta = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": sistema_prompt},
-            {"role": "user", "content": texto_usuario}
-        ],
-        temperature=0.7,
-        max_tokens=150
-    )
-    return respuesta["choices"][0]["message"]["content"].strip()
+        app.logger.error(f"Error general: {str(e)}")
+        return f"❌ Error inesperado: {str(e)}", 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
