@@ -52,7 +52,11 @@ def procesar_audio():
         
         tts = gTTS(text=respuesta, lang='es', slow=False)
         tts.save(output_path)
-        
+
+app.logger.info(f"Tamaño WAV recibido: {len(request.data)} bytes")
+app.logger.info(f"Tamaño MP3 generado: {os.path.getsize(output_path)} bytes")
+app.logger.info(f"Duración estimada audio: {os.path.getsize(output_path)/3200:.2f} segundos")
+
         if os.path.getsize(output_path) < 10240:
             raise ValueError("Archivo MP3 demasiado pequeño")
 
