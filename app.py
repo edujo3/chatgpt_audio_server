@@ -3,10 +3,10 @@ from gtts import gTTS
 import tempfile
 import os
 import openai
-from pydub import AudioSegment  # 🔄 Necesario para convertir MP3 a WAV
 
 app = Flask(__name__)
 
+# Reemplaza con tu clave real de OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route("/")
@@ -18,13 +18,13 @@ def procesar_audio():
     if not request.data:
         return "❌ No se recibió audio", 400
 
-    # Guarda audio recibido
+    # Guarda el audio recibido en un archivo temporal .wav
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
         temp_wav.write(request.data)
         temp_wav_path = temp_wav.name
 
     try:
-        # Transcripción con Whisper
+        # Transcripción con Whisper (requiere clave de OpenAI en OPENAI_API_KEY)
         with open(temp_wav_path, "rb") as f:
             transcription = openai.Audio.transcribe(
                 model="whisper-1",
@@ -34,22 +34,17 @@ def procesar_audio():
         texto = transcription["text"]
         print("📝 Texto transcrito:", texto)
 
-        # Respuesta ChatGPT
+        # Respuesta generada por ChatGPT
         respuesta = generar_respuesta_chatgpt(texto)
         print("💬 Respuesta:", respuesta)
 
-        # Generar MP3 con gTTS
-        mp3_path = os.path.join(tempfile.gettempdir(), "respuesta.mp3")
-        wav_path = os.path.join(tempfile.gettempdir(), "respuesta.wav")
-        gTTS(text=respuesta, lang='es').save(mp3_path)
+        # Texto a voz con gTTS
+        tts = gTTS(text=respuesta, lang='es')
+        output_path = os.path.join(tempfile.gettempdir(), "respuesta.mp3")
+        tts.save(output_path)
 
-        # Convertir MP3 a WAV (16-bit, mono, 16kHz)
-        audio = AudioSegment.from_mp3(mp3_path)
-        audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
-        audio.export(wav_path, format="wav")
-
-        # Enviar WAV al ESP32
-        return send_file(wav_path, mimetype="audio/wav")
+        # Devuelve el archivo MP3 generado
+        return send_file(output_path, mimetype="audio/mpeg", as_attachment=False)
 
     except Exception as e:
         print("❌ Error:", str(e))
